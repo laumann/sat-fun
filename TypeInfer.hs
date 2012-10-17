@@ -102,4 +102,4 @@ tType3 = OTFunc (OTFunc (otUniv 1) (otUniv 2)) (otUniv 3)
 tType4 = OTFunc (otUniv 1) (OTFunc (otUniv 2) (otUniv 3))
 
 
-tc = TC tType1 tType2
+tc = tType1 =*= tType2
