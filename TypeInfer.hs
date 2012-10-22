@@ -1,5 +1,6 @@
 
-import qualified Data.Map as M -- for later...
+import qualified Data.Map as M
+import qualified Data.Set as S
 import Data.List (intercalate)
 
 import FUN
@@ -28,6 +29,14 @@ univ i = UV i
 
 otUniv :: Integer -> OpenType -- (OTUniVar (UV i))
 otUniv = OTUniVar . univ
+
+-- | UV(t) = the set of unification variables occuring in t
+uV :: OpenType -> S.Set UnificationVariable
+uV t = collect t S.empty
+  where collect (OTUniVar u1) uts = S.insert u1 uts
+        collect (OTProduct ot1 ot2) uts = collect ot2 $ collect ot1 uts
+        collect (OTFunc ot1 ot2) uts = collect ot2 $ collect ot1 uts
+        collect _ uts = uts
 
 -- A type substitution maps unification variables to (possibly open) types
 type TypeSub = [(UnificationVariable, OpenType)]
@@ -121,6 +130,42 @@ ctTermProg = TRec "f"
               (TLam "y" (TIf (TLeq (TNum 0) (TVar "x")) (TVar "y")
                          (TApp (TApp (TVar "f") (TPlus (TVar "x") (TNum 1))) (TVar "y")))))
 
+
+-- | Constraint solving
+solveCT :: [TypeConstraint] -> TypeSub -- [(UnificationVariable, OpenType)]
+solveCT constraints = solve constraints []
+  where solve [] cs = cs
+        solve (TC OTInt OTInt:cs) ts = solve cs ts
+        solve (TC OTBool OTBool:cs) ts = solve cs ts
+        solve (TC (OTProduct ot1 ot2) (OTProduct ot1' ot2') : cs) ts = solve ((ot1 =*= ot1'):(ot2 =*= ot2'):cs) ts
+        solve (TC (OTFunc ot1 ot2) (OTFunc ot1' ot2') : cs) ts = solve ((ot1 =*= ot1'):(ot2 =*= ot2'):cs) ts
+        
+        solve (TC OTInt OTBool:_) _ = cannotMatch "int" "bool"
+        solve (TC OTInt (OTProduct _ _):_) _ = cannotMatch "int" "pair"
+        solve (TC OTInt (OTFunc _ _):_) _ = cannotMatch "int" "function"
+
+        solve (TC OTBool OTInt:_) _ = cannotMatch "bool" "int"
+        solve (TC OTBool (OTProduct _ _):_) _ = cannotMatch "bool" "pair"
+        solve (TC OTBool (OTFunc _ _):_) _ = cannotMatch "bool" "function"
+        
+        solve (TC (OTProduct _ _) OTBool:_) _ = cannotMatch "pair" "bool"
+        solve (TC (OTProduct _ _) OTInt:_) _ = cannotMatch "pair" "int"
+        solve (TC (OTProduct _ _) (OTFunc _ _):_) _ = cannotMatch "pair" "function"
+        
+        solve (TC (OTFunc _ _) OTBool:_) _ = cannotMatch "function" "bool"
+        solve (TC (OTFunc _ _) OTInt:_) _ = cannotMatch "function" "int"
+        solve (TC (OTFunc _ _) (OTProduct _ _):_) _ = cannotMatch "function" "pair"
+        
+        solve (TC (OTUniVar u0) (OTUniVar u1):cs) ts = if u0 == u1
+                                                       then solve cs ts
+                                                       else error $ "Cannot unify " ++ show u0 ++ " with " ++ show u1
+        solve (TC (OTUniVar u0) tau:cs) ts = if S.member u0 (uV tau)
+                                             then undefined -- Occurs: check whether u0 == tau
+                                             else undefined -- Elimination: Substitute in cs (, and ts) and add solved constraint to ts
+
+cannotMatch :: String -> String -> TypeSub
+cannotMatch type1 type2 = error $ concat ["Cannot match type ", type1, " with ", type2, "."]
+
 -- | Substituting open type variables using the given type substitution
 -- 
 -- There is a more generic way of applying substitutions (rather than just traversing the list)
@@ -152,11 +197,6 @@ solvesSubstTC tc ts = ot1 == ot2
 
 -- A type environment maps term variables (strings) to open types
 
--- | UV(t) = the set of unification variables occuring in t
-uV :: OpenType -> [OpenType]
-uV t = undefined
-
-
 -- | Testing
 -- Try out: applySubst tType tSubst1
 --          applySubst tType tSubst2
@@ -178,5 +218,7 @@ tType2 = OTFunc (otUniv 2) (otUniv 4)
 tType3 = OTFunc (OTFunc (otUniv 1) (otUniv 2)) (otUniv 3)
 tType4 = OTFunc (otUniv 1) (OTFunc (otUniv 2) (otUniv 3))
 
+-- Try: uV funcy
+funcy = (OTFunc (OTFunc (OTFunc (OTFunc (otUniv 1) (otUniv 2)) (otUniv 1)) (otUniv 3)) (otUniv 2))
 
 tc = tType1 =*= tType2
