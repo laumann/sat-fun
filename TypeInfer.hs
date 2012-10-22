@@ -17,7 +17,7 @@ instance Show OpenType where
   show (OTInt)             = "int"
   show (OTBool)            = "bool"
   show (OTProduct ot1 ot2) = (show ot1) ++ " × " ++ (show ot2)
-  show (OTFunc ot1 ot2)    = "(" ++ (show ot1) ++ " → " ++ (show ot2) ++ ")"
+  show (OTFunc ot1 ot2)    = (show ot1) ++ " → " ++ (show ot2)
   show (OTUniVar uv)       = show uv
 
 instance Show UnificationVariable where
@@ -51,58 +51,75 @@ type TypeEnv = M.Map Id OpenType
 generateConstraints :: Term -> (OpenType, Integer, [TypeConstraint])
 generateConstraints t = genCT M.empty 0 t
 
--- | Input: Type environment mapping term variables to open types.
 genCT :: TypeEnv -> Integer -> Term -> (OpenType, Integer, [TypeConstraint])
 genCT tenv i (TVar id) = (tenv M.! id, i, [])
 genCT tenv i (TBool _) = (OTBool, i, [])
 genCT tenv i (TNum _)  = (OTInt, i, [])
+
 genCT tenv i (TPlus t0 t1) =
   let (tau0, i'', c0) = genCT tenv i t0
       (tau1, i', c1)  = genCT tenv i'' t1
-      constraints     = concat [c0, c1, [tau0 =*= OTInt, tau1 =*= OTInt]]
+      constraints     = (tau0 =*= OTInt):(tau1 =*= OTInt):concat [c0,c1]
   in (OTInt, i', constraints)
+
 genCT tenv i (TLeq t0 t1) =
   let (tau0, i'', c0) = genCT tenv i t0
       (tau1, i', c1)  = genCT tenv i'' t1
-      constraints     = concat [c0, c1, [tau0 =*= OTInt, tau1 =*= OTInt]]
+      constraints     = (tau0 =*= OTInt):(tau1 =*= OTInt):concat [c0,c1]
   in (OTBool, i', constraints)
+
 genCT tenv i (TIf t0 t1 t2) =
   let (tau0, i'', c0)  = genCT tenv i t0
       (tau1, i''', c1) = genCT tenv i'' t1
       (tau2, i', c2)   = genCT tenv i''' t2
-      constraints      = concat [c0, c1, c2, [tau0 =*= OTBool, tau1 =*= tau2]]
+      constraints      = (tau0 =*= OTBool):(tau1 =*= tau2):concat [c0,c1,c2]
   in (tau1, i', constraints)
+
 genCT tenv i (TPair t0 t1) =
   let (tau0, i'', c0) = genCT tenv i t0
       (tau1, i', c1)  = genCT tenv i'' t1
   in (OTProduct tau0 tau1, i', c0 ++ c1)
+
 genCT tenv i (TFst t0) =
   let (tau0, i', c0) = genCT tenv (i+2) t0
       pairCT = OTProduct (otUniv i) (otUniv (i+1))
-  in (otUniv i, i', c0 ++ [tau0 =*= pairCT])
+  in (otUniv i, i', (tau0 =*= pairCT):c0)
+
 genCT tenv i (TSnd t0) =
   let (tau0, i', c0) = genCT tenv (i+2) t0
       pairCT = OTProduct (otUniv i) (otUniv (i+1))
-  in (otUniv (i+1), i', c0 ++ [tau0 =*= pairCT])
+  in (otUniv (i+1), i', (tau0 =*= pairCT):c0)
+
 genCT tenv i (TLam id t0) =
   let (tau0, i', c0) = genCT (M.insert id (otUniv i) tenv) (i+1) t0
   in (OTFunc (otUniv i) tau0, i', c0)
+
 genCT tenv i (TApp t0 t1) =
   let (tau0, i'', c0) = genCT tenv (i+1) t0
       (tau1, i', c1)  = genCT tenv i'' t1
-      funCT = (OTFunc tau1 (otUniv i))
-      constraints = concat [c0, c1, [tau0 =*= funCT]]
+      funCT = OTFunc tau1 (otUniv i)
+      constraints = (tau0 =*= funCT):concat [c0, c1]
   in (otUniv i, i', constraints)
+
 genCT tenv i (TLet id t0 t1) =
   let (tau0, i'', c0) = genCT tenv i t0
       (tau1, i', c1)  = genCT (M.insert id tau0 tenv) i'' t1
   in (tau1, i', c0 ++ c1)
+
 genCT tenv i (TRec id t0) =
   let (tau0, i', c0) = genCT (M.insert id (otUniv i) tenv) (i+1) t0
-  in (tau0, i', c0 ++ [otUniv i =*= tau0])
+  in (tau0, i', (otUniv i =*= tau0):c0)
 
+
+-- | Test constructions
+ctUntype = TPlus (TNum 3) (TBool True)
 ctPairFst = TFst (TPair (TNum 1) (TBool True))
 ctPairSnd = TSnd (TPair (TNum 1) (TBool True))
+
+ctTermProg = TRec "f"
+             (TLam "x"
+              (TLam "y" (TIf (TLeq (TNum 0) (TVar "x")) (TVar "y")
+                         (TApp (TApp (TVar "f") (TPlus (TVar "x") (TNum 1))) (TVar "y")))))
 
 -- | Substituting open type variables using the given type substitution
 -- 

@@ -34,12 +34,7 @@ data Term = TNum Integer
 
 type Program = [Term]
 
-testprog = "rec f.λx.λy if 0 =< x then y else f(x+1)"
-
-testTerm = TRec "f"
-           (TLam "x"
-            (TLam "y" (TIf (TLeq (TNum 0) (TVar "x")) (TVar "y") (TApp (TVar "f") (TPlus (TVar "x") (TNum 1))))))
-
+testprog = "rec f.λx.λy if 0 =< x then y else f (x+1) y"
 
 nesting :: Parser Int
 nesting = do char '('
