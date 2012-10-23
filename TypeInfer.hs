@@ -123,9 +123,9 @@ ctTermProg = TRec "f"
 
 
 -- | Constraint solving
-solveCT :: [TypeConstraint] -> TypeSub -- [(UnificationVariable, OpenType)]
+solveCT :: [TypeConstraint] -> [TypeConstraint] -- [(UnificationVariable, OpenType)]
 solveCT constraints = solve constraints []
-  where solve [] cs                                                  = cs
+  where solve [] ts                                                  = ts
         solve (TC OTInt OTInt:cs) ts                                 = solve cs ts
         solve (TC OTBool OTBool:cs) ts                               = solve cs ts
         solve (TC (OTProduct ot1 ot2) (OTProduct ot1' ot2') : cs) ts = solve ((ot1 =*= ot1'):(ot2 =*= ot2'):cs) ts
@@ -134,7 +134,7 @@ solveCT constraints = solve constraints []
         solve (TC (OTUniVar u0) (OTUniVar u1):cs) ts =
           if u0 == u1
           then solve cs ts
-          else solve (subConstraints u0 (OTUniVar u1) cs) ((u0, (OTUniVar u1)):ts)
+          else solve (subConstraints u0 (OTUniVar u1) cs) ((OTUniVar u0) =*= (OTUniVar u1):subConstraints u0 (OTUniVar u1) ts)
                
         solve (TC (OTUniVar u0) tau:cs) ts = 
           let uvs = uV tau
@@ -142,7 +142,7 @@ solveCT constraints = solve constraints []
              then if tau == (OTUniVar u0)
                   then solve cs ts
                   else error $ show u0 ++ " occurs in UV(" ++ show tau ++ ")"
-             else solve (subConstraints u0 tau cs) ((u0, tau):ts)
+             else solve (subConstraints u0 tau cs) ((OTUniVar u0) =*= tau : subConstraints u0 tau ts)
                   
         solve (TC tau (OTUniVar u0):cs) ts = 
           let uvs = uV tau
@@ -150,7 +150,7 @@ solveCT constraints = solve constraints []
              then if tau == (OTUniVar u0)
                   then solve cs ts
                   else error $ show u0 ++ " occurs in UV(" ++ show tau ++ ")"
-             else solve (subConstraints u0 tau cs) ((u0, tau):ts)
+             else solve (subConstraints u0 tau cs) ((OTUniVar u0) =*= tau : subConstraints u0 tau ts)
         
         solve (TC ot1 ot2:cs) _ = cannotMatch (show ot1) (show ot2)
         
@@ -158,14 +158,15 @@ typeSubToTC :: TypeSub -> [TypeConstraint]
 typeSubToTC []           = []
 typeSubToTC ((uv,ot):ts) = TC (OTUniVar uv) ot : typeSubToTC ts
 
-cannotMatch :: String -> String -> TypeSub
+cannotMatch :: String -> String -> [TypeConstraint]
 cannotMatch type1 type2 = error $ concat ["Cannot match type ", type1, " with ", type2, "."]
 
+-- | Substitute in the given constraints the unification variable for opentype
 subConstraints :: UnificationVariable -> OpenType -> [TypeConstraint] -> [TypeConstraint]
 subConstraints uv tau tcs = map (subConstraint uv tau) tcs
 
 subConstraint :: UnificationVariable -> OpenType -> TypeConstraint -> TypeConstraint
-subConstraint uv tau (TC tau0 tau1) = TC (subOpenType tau0 uv tau) (subOpenType tau1 uv tau)
+subConstraint uv tau (TC tau0 tau1) = (subOpenType tau0 uv tau) =*= (subOpenType tau1 uv tau)
 
 
 subOpenType :: OpenType -> UnificationVariable -> OpenType -> OpenType
