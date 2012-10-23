@@ -34,7 +34,7 @@ data Term = TNum Integer
 
 type Program = [Term]
 
-testprog = "rec f.λx.λy if 0 =< x then y else f (x+1) y"
+testprog = "rec f.λx.λy if 0 ≤ x then y else f (x+1) y"
 
 nesting :: Parser Int
 nesting = do char '('
@@ -44,19 +44,13 @@ nesting = do char '('
              return $ max (n+1) m
           <|> return 0
 
---num = token $ do str <- many1 digit
-  --               return $ read str
-
-
 program :: Parser Program
 program = many1 term
-
 
 term :: Parser Term
 term = tNum <|> tBool <|> tVar <|> tIf
 
-tNum = do spaces 
-          n <- num
+tNum = do n <- num
           return $ TNum n
 
 tBool = do spaces
@@ -93,7 +87,8 @@ tLet = undefined
 tRec = undefined
 
 num :: Parser Integer
-num = do s <- many1 digit
+num = do spaces
+         s <- many1 digit
          return $ read s
 
 var :: Parser Id
@@ -104,7 +99,7 @@ var = do spaces
          
 
 keyword :: String -> Parser ()         
-keyword s = spaces >> (try $ string s) >> return ()
+keyword s = try $ spaces >> string s >> return ()
 
 symbol :: String -> Parser String
 symbol s = try $ string s >>= \s -> return s
