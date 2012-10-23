@@ -38,6 +38,7 @@ uV t = collect t S.empty
         collect (OTFunc ot1 ot2) uts = collect ot2 $ collect ot1 uts
         collect _ uts = uts
 
+
 -- A type substitution maps unification variables to (possibly open) types
 type TypeSub = [(UnificationVariable, OpenType)]
 
@@ -64,57 +65,47 @@ genCT :: TypeEnv -> Integer -> Term -> (OpenType, Integer, [TypeConstraint])
 genCT tenv i (TVar id) = (tenv M.! id, i, [])
 genCT tenv i (TBool _) = (OTBool, i, [])
 genCT tenv i (TNum _)  = (OTInt, i, [])
-
 genCT tenv i (TPlus t0 t1) =
   let (tau0, i'', c0) = genCT tenv i t0
       (tau1, i', c1)  = genCT tenv i'' t1
       constraints     = (tau0 =*= OTInt):(tau1 =*= OTInt):concat [c0,c1]
   in (OTInt, i', constraints)
-
 genCT tenv i (TLeq t0 t1) =
   let (tau0, i'', c0) = genCT tenv i t0
       (tau1, i', c1)  = genCT tenv i'' t1
       constraints     = (tau0 =*= OTInt):(tau1 =*= OTInt):concat [c0,c1]
   in (OTBool, i', constraints)
-
 genCT tenv i (TIf t0 t1 t2) =
   let (tau0, i'', c0)  = genCT tenv i t0
       (tau1, i''', c1) = genCT tenv i'' t1
       (tau2, i', c2)   = genCT tenv i''' t2
       constraints      = (tau0 =*= OTBool):(tau1 =*= tau2):concat [c0,c1,c2]
   in (tau1, i', constraints)
-
 genCT tenv i (TPair t0 t1) =
   let (tau0, i'', c0) = genCT tenv i t0
       (tau1, i', c1)  = genCT tenv i'' t1
   in (OTProduct tau0 tau1, i', c0 ++ c1)
-
 genCT tenv i (TFst t0) =
   let (tau0, i', c0) = genCT tenv (i+2) t0
       pairCT = OTProduct (otUniv i) (otUniv (i+1))
   in (otUniv i, i', (tau0 =*= pairCT):c0)
-
 genCT tenv i (TSnd t0) =
   let (tau0, i', c0) = genCT tenv (i+2) t0
       pairCT = OTProduct (otUniv i) (otUniv (i+1))
   in (otUniv (i+1), i', (tau0 =*= pairCT):c0)
-
 genCT tenv i (TLam id t0) =
   let (tau0, i', c0) = genCT (M.insert id (otUniv i) tenv) (i+1) t0
   in (OTFunc (otUniv i) tau0, i', c0)
-
 genCT tenv i (TApp t0 t1) =
   let (tau0, i'', c0) = genCT tenv (i+1) t0
       (tau1, i', c1)  = genCT tenv i'' t1
       funCT = OTFunc tau1 (otUniv i)
       constraints = (tau0 =*= funCT):concat [c0, c1]
   in (otUniv i, i', constraints)
-
 genCT tenv i (TLet id t0 t1) =
   let (tau0, i'', c0) = genCT tenv i t0
       (tau1, i', c1)  = genCT (M.insert id tau0 tenv) i'' t1
   in (tau1, i', c0 ++ c1)
-
 genCT tenv i (TRec id t0) =
   let (tau0, i', c0) = genCT (M.insert id (otUniv i) tenv) (i+1) t0
   in (tau0, i', (otUniv i =*= tau0):c0)
@@ -134,37 +125,55 @@ ctTermProg = TRec "f"
 -- | Constraint solving
 solveCT :: [TypeConstraint] -> TypeSub -- [(UnificationVariable, OpenType)]
 solveCT constraints = solve constraints []
-  where solve [] cs = cs
-        solve (TC OTInt OTInt:cs) ts = solve cs ts
-        solve (TC OTBool OTBool:cs) ts = solve cs ts
+  where solve [] cs                                                  = cs
+        solve (TC OTInt OTInt:cs) ts                                 = solve cs ts
+        solve (TC OTBool OTBool:cs) ts                               = solve cs ts
         solve (TC (OTProduct ot1 ot2) (OTProduct ot1' ot2') : cs) ts = solve ((ot1 =*= ot1'):(ot2 =*= ot2'):cs) ts
-        solve (TC (OTFunc ot1 ot2) (OTFunc ot1' ot2') : cs) ts = solve ((ot1 =*= ot1'):(ot2 =*= ot2'):cs) ts
+        solve (TC (OTFunc ot1 ot2) (OTFunc ot1' ot2') : cs) ts       = solve ((ot1 =*= ot1'):(ot2 =*= ot2'):cs) ts
         
-        solve (TC OTInt OTBool:_) _ = cannotMatch "int" "bool"
-        solve (TC OTInt (OTProduct _ _):_) _ = cannotMatch "int" "pair"
-        solve (TC OTInt (OTFunc _ _):_) _ = cannotMatch "int" "function"
-
-        solve (TC OTBool OTInt:_) _ = cannotMatch "bool" "int"
-        solve (TC OTBool (OTProduct _ _):_) _ = cannotMatch "bool" "pair"
-        solve (TC OTBool (OTFunc _ _):_) _ = cannotMatch "bool" "function"
+        solve (TC (OTUniVar u0) (OTUniVar u1):cs) ts =
+          if u0 == u1
+          then solve cs ts
+          else solve (subConstraints u0 (OTUniVar u1) cs) ((u0, (OTUniVar u1)):ts)
+               
+        solve (TC (OTUniVar u0) tau:cs) ts = 
+          let uvs = uV tau
+          in if S.member u0 uvs
+             then if tau == (OTUniVar u0)
+                  then solve cs ts
+                  else error $ show u0 ++ " occurs in UV(" ++ show tau ++ ")"
+             else solve (subConstraints u0 tau cs) ((u0, tau):ts)
+                  
+        solve (TC tau (OTUniVar u0):cs) ts = 
+          let uvs = uV tau
+          in if S.member u0 uvs
+             then if tau == (OTUniVar u0)
+                  then solve cs ts
+                  else error $ show u0 ++ " occurs in UV(" ++ show tau ++ ")"
+             else solve (subConstraints u0 tau cs) ((u0, tau):ts)
         
-        solve (TC (OTProduct _ _) OTBool:_) _ = cannotMatch "pair" "bool"
-        solve (TC (OTProduct _ _) OTInt:_) _ = cannotMatch "pair" "int"
-        solve (TC (OTProduct _ _) (OTFunc _ _):_) _ = cannotMatch "pair" "function"
+        solve (TC ot1 ot2:cs) _ = cannotMatch (show ot1) (show ot2)
         
-        solve (TC (OTFunc _ _) OTBool:_) _ = cannotMatch "function" "bool"
-        solve (TC (OTFunc _ _) OTInt:_) _ = cannotMatch "function" "int"
-        solve (TC (OTFunc _ _) (OTProduct _ _):_) _ = cannotMatch "function" "pair"
-        
-        solve (TC (OTUniVar u0) (OTUniVar u1):cs) ts = if u0 == u1
-                                                       then solve cs ts
-                                                       else error $ "Cannot unify " ++ show u0 ++ " with " ++ show u1
-        solve (TC (OTUniVar u0) tau:cs) ts = if S.member u0 (uV tau)
-                                             then undefined -- Occurs: check whether u0 == tau
-                                             else undefined -- Elimination: Substitute in cs (, and ts) and add solved constraint to ts
+typeSubToTC :: TypeSub -> [TypeConstraint]
+typeSubToTC []           = []
+typeSubToTC ((uv,ot):ts) = TC (OTUniVar uv) ot : typeSubToTC ts
 
 cannotMatch :: String -> String -> TypeSub
 cannotMatch type1 type2 = error $ concat ["Cannot match type ", type1, " with ", type2, "."]
+
+subConstraints :: UnificationVariable -> OpenType -> [TypeConstraint] -> [TypeConstraint]
+subConstraints uv tau tcs = map (subConstraint uv tau) tcs
+
+subConstraint :: UnificationVariable -> OpenType -> TypeConstraint -> TypeConstraint
+subConstraint uv tau (TC tau0 tau1) = TC (subOpenType tau0 uv tau) (subOpenType tau1 uv tau)
+
+
+subOpenType :: OpenType -> UnificationVariable -> OpenType -> OpenType
+subOpenType (OTUniVar uv1) uv0 tau0        = if uv1 == uv0 then tau0 else (OTUniVar uv1)
+subOpenType (OTProduct tau1 tau2) uv0 tau0 = OTProduct (subOpenType tau1 uv0 tau0) (subOpenType tau2 uv0 tau0)
+subOpenType (OTFunc tau1 tau2) uv0 tau0    = OTFunc (subOpenType tau1 uv0 tau0) (subOpenType tau2 uv0 tau0)
+subOpenType tau0 uv0 _                     = tau0
+
 
 -- | Substituting open type variables using the given type substitution
 -- 
